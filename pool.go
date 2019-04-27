@@ -104,13 +104,11 @@ func (p *GoshPool) send() {
 		for {
 			select {
 			case worker, ok := <-GoshPoolGlobal:
-				mutex.Lock()
 				if !ok {
 					break Cycle
 				}
 				worker.isActive = true
 				p.ProcGoshPool <- worker
-				mutex.Unlock()
 			default:
 				//incoming tasks directly to worker
 				if p.waitingQueue.Len() != 0 {
