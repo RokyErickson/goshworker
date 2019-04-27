@@ -9,11 +9,13 @@ import (
 )
 
 func main() {
-	NewPoolGlobal(4, []string{"cat", "-"})
-	p := NewGoshPool(4)
+	NewPoolGlobal(200, []string{"cat", "-"})
+	p := NewGoshPool(1)
+	q := NewGoshPool(1)
 
 	for i := 0; i < 200; i++ {
 		p.Submit(Task1)
+		q.Submit(Task1)
 	}
 	p.StopWait()
 	EndPoolGlobal()

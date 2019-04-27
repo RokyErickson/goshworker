@@ -107,8 +107,11 @@ func (p *GoshPool) send() {
 				if !ok {
 					break Cycle
 				}
-				worker.isActive = true
-				p.ProcGoshPool <- worker
+				if workerCount < p.Size {
+					worker.isActive = true
+					w2proc := func() { p.ProcGoshPool <- worker }
+					go w2proc()
+				}
 			default:
 				//incoming tasks directly to worker
 				if p.waitingQueue.Len() != 0 {
@@ -229,6 +232,8 @@ func (p *GoshPool) StopWait() {
 
 //submits task
 func (p *GoshPool) Submit(t Task) {
+	p.poolmutex.Lock()
+	defer p.poolmutex.Unlock()
 	if t != nil {
 		w := &Work{t, make(chan error, 1)}
 		p.TaskQueue <- w
