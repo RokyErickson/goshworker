@@ -5,8 +5,8 @@ import (
 	"github.com/RokyErickson/gosh/iox"
 )
 
-// proc represents a worker process.
-type proc struct {
+// goshworker represents a worker goshworkeress.
+type goshworker struct {
 	process  Proc
 	cmd      Command
 	in       *iox.PipeWriter
@@ -15,8 +15,8 @@ type proc struct {
 	isActive bool
 }
 
-//Makes a new Proc
-func newProc(opts []string) *proc {
+//Makes a new Goshworker
+func newGoshworker(opts []string) *goshworker {
 
 	buf1 := iox.New(24 * 1024)
 	buf2 := iox.New(24 * 1024)
@@ -26,33 +26,28 @@ func newProc(opts []string) *proc {
 	r2, w2 := iox.Pipe(buf2)
 	r3, w3 := iox.Pipe(buf3)
 
-	cmd := Gosh(Opts{
-		Args: opts,
-		In:   r1,
-		Out:  w2,
-		Err:  w3,
-	}).Bake()
+	cmd := Gosh(Opts{Args: opts, In: r1, Out: w2, Err: w3}).Bake()
 
-	return &proc{cmd: cmd, in: w1, out: r2, err: r3}
+	return &goshworker{cmd: cmd, in: w1, out: r2, err: r3}
 }
 
-// Start starts the worker process.
-func (p *proc) Start() {
+// Start starts the worker goshworkeress.
+func (p *goshworker) Start() {
 	p.process = p.cmd.Start()
 }
 
-func (p *proc) Recycle() {
+func (p *goshworker) Recycle() {
 	p.isActive = false
 	// Return it back to the global worker pool
-	PoolGlobal <- p
+	GoshPoolGlobal <- p
 }
 
-var testProcRunHook func(*proc)
+var testGoshworkerRunHook func(*goshworker)
 
-// Run starts processing tasks from the channel and
+// Run starts goshworkeressing tasks from the channel and
 // blocks until the tasks channel is closed or the Gosh
 // commands completes and it's waitchan closes
-func (p *proc) Run(StartReady, RoutinePool chan chan *Work) {
+func (p *goshworker) Run(StartReady, RoutinePool chan chan *Work) {
 	go func() {
 		defer p.process.Wait()
 		Tasks := make(chan *Work)
@@ -65,8 +60,8 @@ func (p *proc) Run(StartReady, RoutinePool chan chan *Work) {
 				if !ok {
 					return
 				}
-				if testProcRunHook != nil {
-					testProcRunHook(p)
+				if testGoshworkerRunHook != nil {
+					testGoshworkerRunHook(p)
 				}
 				w.errchan <- w.task(p.in, p.out, p.err)
 				RoutinePool <- Tasks

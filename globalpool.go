@@ -1,16 +1,16 @@
 package goshworker
 
-var PoolGlobal chan *proc
+var GoshPoolGlobal chan *goshworker
 var isBigPoolInitialized bool
 
 func NewPoolGlobal(size int, opts []string) error {
 	mutex.Lock()
 	defer mutex.Unlock()
 	if !isBigPoolInitialized {
-		PoolGlobal = make(chan *proc, size)
+		GoshPoolGlobal = make(chan *goshworker, size)
 		for i := 0; i < size; i++ {
-			w := newProc(opts)
-			PoolGlobal <- w
+			w := newGoshworker(opts)
+			GoshPoolGlobal <- w
 		}
 		isBigPoolInitialized = true
 		return nil
@@ -23,10 +23,10 @@ func EndPoolGlobal() error {
 	mutex.Lock()
 	defer mutex.Unlock()
 	if isBigPoolInitialized {
-		close(PoolGlobal)
+		close(GoshPoolGlobal)
 		size, _ := GetNumWorkersTotal()
 		for i := 0; i < size; i++ {
-			<-PoolGlobal
+			<-GoshPoolGlobal
 		}
 		isBigPoolInitialized = false
 		return nil
@@ -54,7 +54,7 @@ func GetNumWorkersTotal() (int, error) {
 		return 0, newError("Global worker pool was not initialized")
 	}
 
-	return cap(PoolGlobal), nil
+	return cap(GoshPoolGlobal), nil
 }
 
 func GetNumWorkersAvail() (int, error) {
@@ -62,5 +62,5 @@ func GetNumWorkersAvail() (int, error) {
 		return 0, newError("Global worker pool was not initialized")
 	}
 
-	return len(PoolGlobal), nil
+	return len(GoshPoolGlobal), nil
 }
