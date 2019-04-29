@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"io"
 	"os"
-	"time"
 
 	. "github.com/RokyErickson/goshworker"
 )
@@ -32,9 +31,4 @@ func Task1(in io.Writer, out, err io.Reader) error {
 		io.Copy(os.Stderr, err)
 	}()
 	return nil
-}
-
-func demoFunc() {
-	n := 10
-	time.Sleep(time.Duration(n) * time.Millisecond)
 }
