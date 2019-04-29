@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/RokyErickson/channels"
 	"github.com/gammazero/deque"
 
 	. "github.com/RokyErickson/gosh"
@@ -18,7 +19,8 @@ const (
 	idleTimeout              = 5
 )
 
-var Tasks chan *Work
+var Tasks channels.Channel
+
 var mutex sync.Mutex
 
 type GoshPool struct {
@@ -27,8 +29,8 @@ type GoshPool struct {
 	timeout         time.Duration
 	stopped         bool
 	ProcGoshPool    chan *goshworker
-	RoutineGoshPool chan chan *Work
-	StartReady      chan chan *Work
+	RoutineGoshPool chan channels.Channel
+	StartReady      chan channels.Channel
 	TaskQueue       chan *Work
 	StopChannel     chan struct{}
 	waitingQueue    deque.Deque
@@ -66,8 +68,8 @@ func NewGoshPool(size int) *GoshPool {
 		Size:            size,
 		timeout:         time.Second * idleTimeout,
 		ProcGoshPool:    make(chan *goshworker, size),
-		RoutineGoshPool: make(chan chan *Work, RoutineGoshPoolQueueSize),
-		StartReady:      make(chan chan *Work),
+		RoutineGoshPool: make(chan channels.Channel, RoutineGoshPoolQueueSize),
+		StartReady:      make(chan channels.Channel),
 		TaskQueue:       make(chan *Work, 1),
 		StopChannel:     make(chan struct{}),
 	}
@@ -80,7 +82,9 @@ func NewGoshPool(size int) *GoshPool {
 func (p *GoshPool) send() {
 
 	go func() {
+		mutex.Lock()
 		defer close(p.StopChannel)
+
 		timeout := time.NewTimer(p.timeout)
 		var (
 			workerCount int
@@ -99,79 +103,73 @@ func (p *GoshPool) send() {
 		if p.Size > numWorkersAvail {
 			panic("Not enough workers available at this moment")
 		}
-	Cycle:
+		for i := 0; i < p.Size; i++ {
+			worker := <-GoshPoolGlobal
+			worker.isActive = true
+			go func(worker *goshworker) { p.ProcGoshPool <- worker }(worker)
+		}
+		mutex.Unlock()
 
+		//incoming tasks directly to worker
+	Cycle:
 		for {
-			select {
-			case worker, ok := <-GoshPoolGlobal:
-				if !ok {
-					break Cycle
-				}
-				if workerCount < p.Size {
-					worker.isActive = true
-					w2proc := func() { p.ProcGoshPool <- worker }
-					go w2proc()
-				}
-			default:
-				//incoming tasks directly to worker
-				if p.waitingQueue.Len() != 0 {
-					select {
-					case work, ok = <-p.TaskQueue:
-						if !ok {
-							break Cycle
-						}
-						if work == nil {
-							wait = true
-							break Cycle
-						}
-						p.waitingQueue.PushBack(work)
-					case Tasks = <-p.RoutineGoshPool:
-						//worker ready, make him work!
-						Tasks <- p.waitingQueue.PopFront().(*Work)
-					}
-					continue
-				}
-				//working queue empty
-				timeout.Reset(p.timeout)
+			if p.waitingQueue.Len() != 0 {
 				select {
 				case work, ok = <-p.TaskQueue:
-					if !ok || work == nil {
+					if !ok {
 						break Cycle
 					}
-					//got work to do.
-					select {
-					case Tasks = <-p.RoutineGoshPool:
-						//give work
-						Tasks <- work
-					default:
-						//proc not ready make new proc.
-						if workerCount < p.Size {
-							workerCount++
-							worker := <-p.ProcGoshPool
-							worker.Start()
-							go func(worker *goshworker, work *Work) {
-								worker.Run(p.StartReady, p.RoutineGoshPool)
-								Tasks := <-p.StartReady
-								Tasks <- work
-								p.ProcGoshPool <- worker
-							}(worker, work)
-						} else {
-							//queued task to be executed by worker
-							p.waitingQueue.PushBack(work)
-						}
+					if work == nil {
+						wait = true
+						break Cycle
+					}
+					p.waitingQueue.PushBack(work)
+					Tasks = <-p.RoutineGoshPool
+					//worker ready, make him work!
+					Tasks.In() <- p.waitingQueue.PopFront().(*Work)
+				}
+				continue
+			}
+			//working queue empty
+			timeout.Reset(p.timeout)
+			select {
+			case work, ok = <-p.TaskQueue:
+				if !ok || work == nil {
+					break Cycle
+				}
+				//got work to do.
+				select {
+				case Tasks := <-p.RoutineGoshPool:
+					//give work
+					Tasks.In() <- work
+				default:
+					//proc not ready make new proc.
+					if workerCount < p.Size {
+						workerCount++
+						worker := <-p.ProcGoshPool
+						worker.Start()
+						go func(worker *goshworker, work *Work) {
+							worker.Run(p.StartReady, p.RoutineGoshPool)
+							Tasks := <-p.StartReady
+							Tasks.In() <- work
+							p.ProcGoshPool <- worker
+						}(worker, work)
+					} else {
+						//queued task to be executed by worker
+						p.waitingQueue.PushBack(work)
 
 					}
-				case <-timeout.C:
-					//timeout waiting for work
-					if workerCount > 0 {
-						select {
-						case Tasks = <-p.RoutineGoshPool:
-							//Kill routine pool proc.
-							close(Tasks)
-							workerCount--
-						default:
-							//No work, but all procs busy.
-						}
+				}
+			case <-timeout.C:
+				//timeout waiting for work
+				if workerCount > 0 {
+					select {
+					case Tasks = <-p.RoutineGoshPool:
+						//Kill routine pool proc.
+						Tasks.Close()
+						workerCount--
+					default:
+						//No work, but all procs busy.
 					}
 				}
 			}
@@ -180,14 +178,14 @@ func (p *GoshPool) send() {
 		if wait {
 			for p.waitingQueue.Len() != 0 {
 				Tasks = <-p.RoutineGoshPool
-				Tasks <- p.waitingQueue.PopFront().(*Work)
+				Tasks.In() <- p.waitingQueue.PopFront().(*Work)
 			}
 		}
 
 		//stop all procs
 		for workerCount > 0 {
 			Tasks = <-p.RoutineGoshPool
-			close(Tasks)
+			Tasks.Close()
 			workerCount--
 		}
 	}()
@@ -232,8 +230,6 @@ func (p *GoshPool) StopWait() {
 
 //submits task
 func (p *GoshPool) Submit(t Task) {
-	p.poolmutex.Lock()
-	defer p.poolmutex.Unlock()
 	if t != nil {
 		w := &Work{t, make(chan error, 1)}
 		p.TaskQueue <- w

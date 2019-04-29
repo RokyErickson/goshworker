@@ -1,6 +1,7 @@
 package goshworker
 
 import (
+	"github.com/RokyErickson/channels"
 	. "github.com/RokyErickson/gosh"
 	"github.com/RokyErickson/gosh/iox"
 )
@@ -47,16 +48,17 @@ var testGoshworkerRunHook func(*goshworker)
 // Run starts goshworkeressing tasks from the channel and
 // blocks until the tasks channel is closed or the Gosh
 // commands completes and it's waitchan closes
-func (p *goshworker) Run(StartReady, RoutinePool chan chan *Work) {
+func (p *goshworker) Run(StartReady, RoutinePool chan channels.Channel) {
 	go func() {
 		defer p.process.Wait()
-		Tasks := make(chan *Work)
+		Tasks := channels.NewNativeChannel(0)
 		StartReady <- Tasks
 		for {
 			select {
 			case <-p.process.WaitChan():
 				return
-			case w, ok := <-Tasks:
+			case out, ok := <-Tasks.Out():
+				w := out.(*Work)
 				if !ok {
 					return
 				}
