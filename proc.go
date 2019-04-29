@@ -40,7 +40,7 @@ func (p *goshworker) Start() {
 func (p *goshworker) Recycle() {
 	p.isActive = false
 	// Return it back to the global worker pool
-	GoshPoolGlobal <- p
+	GoshPoolGlobal.In() <- p
 }
 
 var testGoshworkerRunHook func(*goshworker)
@@ -48,11 +48,11 @@ var testGoshworkerRunHook func(*goshworker)
 // Run starts goshworkeressing tasks from the channel and
 // blocks until the tasks channel is closed or the Gosh
 // commands completes and it's waitchan closes
-func (p *goshworker) Run(StartReady, RoutinePool chan channels.Channel) {
+func (p *goshworker) Run(StartReady, RoutinePool channels.Channel) {
 	go func() {
 		defer p.process.Wait()
 		Tasks := channels.NewNativeChannel(0)
-		StartReady <- Tasks
+		StartReady.In() <- Tasks
 		for {
 			select {
 			case <-p.process.WaitChan():
@@ -66,7 +66,7 @@ func (p *goshworker) Run(StartReady, RoutinePool chan channels.Channel) {
 					testGoshworkerRunHook(p)
 				}
 				w.errchan <- w.task(p.in, p.out, p.err)
-				RoutinePool <- Tasks
+				RoutinePool.In() <- Tasks
 			}
 		}
 	}()

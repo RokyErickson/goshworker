@@ -1,16 +1,19 @@
 package goshworker
 
-var GoshPoolGlobal chan *goshworker
+import "github.com/RokyErickson/channels"
+
+var GoshPoolGlobal channels.Channel
 var isBigPoolInitialized bool
 
-func NewPoolGlobal(size int, opts []string) error {
+func NewPoolGlobal(size channels.BufferCap, opts []string) error {
 	mutex.Lock()
 	defer mutex.Unlock()
 	if !isBigPoolInitialized {
-		GoshPoolGlobal = make(chan *goshworker, size)
-		for i := 0; i < size; i++ {
+		GoshPoolGlobal = channels.NewNativeChannel(size)
+		var workernum int = int(size)
+		for i := 0; i < workernum; i++ {
 			w := newGoshworker(opts)
-			GoshPoolGlobal <- w
+			GoshPoolGlobal.In() <- w
 		}
 		isBigPoolInitialized = true
 		return nil
@@ -23,11 +26,12 @@ func EndPoolGlobal() error {
 	mutex.Lock()
 	defer mutex.Unlock()
 	if isBigPoolInitialized {
-		close(GoshPoolGlobal)
 		size, _ := GetNumWorkersTotal()
-		for i := 0; i < size; i++ {
-			<-GoshPoolGlobal
+		var workernum int = int(size)
+		for i := 0; i < workernum; i++ {
+			<-GoshPoolGlobal.Out()
 		}
+		GoshPoolGlobal.Close()
 		isBigPoolInitialized = false
 		return nil
 	}
@@ -49,12 +53,12 @@ func newError(errMsg string) error {
 }
 
 // GetNumWorkersTotal returns total number of workers created by the global worker pool
-func GetNumWorkersTotal() (int, error) {
+func GetNumWorkersTotal() (channels.BufferCap, error) {
 	if !isBigPoolInitialized {
 		return 0, newError("Global worker pool was not initialized")
 	}
 
-	return cap(GoshPoolGlobal), nil
+	return GoshPoolGlobal.Cap(), nil
 }
 
 func GetNumWorkersAvail() (int, error) {
@@ -62,5 +66,5 @@ func GetNumWorkersAvail() (int, error) {
 		return 0, newError("Global worker pool was not initialized")
 	}
 
-	return len(GoshPoolGlobal), nil
+	return GoshPoolGlobal.Len(), nil
 }
